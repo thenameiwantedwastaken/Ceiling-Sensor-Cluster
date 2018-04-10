@@ -4,6 +4,9 @@
 
 #define LedPin 13
 
+//Todo
+// Add class MotionSensor(pin,lockout,name)
+
 // Establish a MAC address
 byte mac[]    = {  0xDE, 0xED, 0xBA, 0xFE, 0xFE, 0xED };
 
