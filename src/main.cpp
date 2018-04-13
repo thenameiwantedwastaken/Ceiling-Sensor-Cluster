@@ -5,19 +5,77 @@
 #define LedPin 13
 
 //Todo
-// Add class MotionSensor(pin,lockout,name)
+// Add functions to class, add loop to class
+
+// MotionSensor class
+class MotionSensor{
+  // Setup variables
+  int msPin;                        //The pin to read input from
+  bool msMotionState;               //Whether in a motion detected state
+  unsigned long msLastChangedTime;  //The time of the last state change or last motion detected
+  int msDelayPeriod;                //Period (ms) during which an on state will be maintained
+  const char *msName;               //Name of the sensor, used as MQTT sub-topic
+
+  //MotionSensor constructor
+  public:
+
+    MotionSensor(int pin, int delay, String name)
+    {
+      // Read in arguments
+      msPin = pin;
+      msDelayPeriod = delay;
+      String topic = "MotionSensor/";
+      topic = topic+name;
+      msName=topic.c_str();
+
+      // Set defaults for other variables
+      msMotionState=0;
+      msLastChangedTime=0;
+
+      // Set-up read-in pin
+      pinMode(msPin, INPUT);
+    } // end constructor
+
+    int Update(){
+      // Read the motion state of this sensor right now
+      int motionNow = 0;
+      int toreturn=3;
+      motionNow=digitalRead(msPin);
+      //Serial.println(": MotionNow=" + String(motionNow));
+      unsigned long currentMillis = millis();
+
+      //Step through each of the sensors
+      //if there is movement, we can update the timer regardless of the previous state
+      if (motionNow==HIGH) {
+        msLastChangedTime=currentMillis;
+      }
+      if (msMotionState==0){
+        // Motion state is set to false. Set it to true if there is movement (regardless of timer)
+        if (motionNow==HIGH){
+          msMotionState=1;
+          msLastChangedTime=currentMillis;
+          toreturn=1;
+        }
+      } else if (msMotionState==1 && motionNow==LOW && currentMillis - msLastChangedTime >= msDelayPeriod){
+        msMotionState=0;
+        msLastChangedTime=currentMillis;
+        toreturn=0;
+      }//end if motion state was true and no motion and timedout
+    return(toreturn);
+  } // end update routine
+
+  const char* Name(){
+    return msName;
+  }
+}; //end MotionSensor class
 
 // Establish a MAC address
 byte mac[]    = {  0xDE, 0xED, 0xBA, 0xFE, 0xFE, 0xED };
 
-//Setup arrays for microwave sensors
-int SensorPins[] = {2,3}; // A list of the sensor pins to which motion sensors are attached
-const byte SensorCount = sizeof(SensorPins) / sizeof(int);
-bool MotionState[SensorCount]; // 1=on, 0=off
-unsigned long LastTime[SensorCount]; //Last time a change was made to motionstate
-int DelayPeriod[SensorCount];
-const char *SensorNames[] = { "Toilet", "Hallway",  "Bathroom"};
-
+//Set up sensors
+//MotionSensor (pin,ms delay,"name")
+MotionSensor Toilet(2,10000,"Toilet");
+//MotionSensor Hallway(3,10000,"Hallway");
 
 
 EthernetClient ethClient;
@@ -28,7 +86,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print("Message arrived [");
   Serial.print(topic);
   Serial.print("] ");
-  for (int i=0;i<length;i++) {
+  for (unsigned int i=0;i<length;i++) {
     Serial.print((char)payload[i]);
   }
   Serial.println();
@@ -58,20 +116,11 @@ void reconnect() {
 
 void setup()
 {
-  // Setup input pin, motion state and timers for each sensor
-  for (int x=0;x<SensorCount;x++){
-    pinMode(SensorPins[x], INPUT);
-    MotionState[x]=0;
-    LastTime[x]=0;
-    DelayPeriod[x]=10000; // Milliseconds to ignore input after each change of state
-  }
-
   pinMode(LedPin, OUTPUT);
   Serial.begin(57600);
 
   client.setServer("openhabianpi.fritz.box", 1883);
   client.setCallback(callback);
-
   Ethernet.begin(mac); // IP will be set by DHCP
   // Allow the hardware to sort itself out
   delay(1500);
@@ -86,40 +135,13 @@ void loop()
   client.loop();
   }
 
-for (int x=0; x<SensorCount; x++){
-
-
-
-    // Sort out the MQTT Topic string as a char constant
-    String topic = "MotionSensor/";
-    topic = topic+SensorNames[x];
-    const char* chartopic=topic.c_str();
-
-    // Read the motion state of this sensor right now
-    int motionNow = 0;
-    motionNow=digitalRead(SensorPins[x]);
-    //Serial.println(": MotionNow=" + String(motionNow));
-    unsigned long currentMillis = millis();
-
-    //Step through each of the sensors
-    //if there is movement, we can update the timer regardless of the previous state
-    if (motionNow==HIGH) {
-      LastTime[x]=currentMillis;
-    }
-    if (MotionState[x]==0){
-      // Motion state is set to false. Set it to true if there is movement (regardless of timer)
-      if (motionNow==HIGH){
-        Serial.println(topic +" motion event triggered");
-        client.publish(chartopic,"1"); // Announce motion to MQTT
-        MotionState[x]=1;
-        LastTime[x]=currentMillis;
-      }
-    } else if (MotionState[x]==1 && motionNow==LOW && currentMillis - LastTime[x] >= DelayPeriod[x]){
-      Serial.println(topic + " motion event ended");
-      client.publish(chartopic,"0"); // Announce (lack of) motion to MQTT
-      MotionState[x]=0;
-      LastTime[x]=currentMillis;
-    }//end if motion state was true and no motion and timedout
+int result=Toilet.Update();
+Serial.println(result);
+if (result==1){
+  client.publish("MotionSensor/Toilet","1");
+} else if (result==0){
+  client.publish("MotionSensor/Toilet","0");
 }
+
 delay(200);
 }
