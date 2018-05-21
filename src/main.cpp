@@ -4,8 +4,6 @@
 
 #define LedPin 13
 
-//Todo
-// Add functions to class, add loop to class
 
 // MotionSensor class
 class MotionSensor{
@@ -13,20 +11,18 @@ class MotionSensor{
   int msPin;                        //The pin to read input from
   bool msMotionState;               //Whether in a motion detected state
   unsigned long msLastChangedTime;  //The time of the last state change or last motion detected
-  int msDelayPeriod;                //Period (ms) during which an on state will be maintained
+  unsigned long msDelayPeriod;         //Period (secs) during which an on state will be maintained
   const char *msName;               //Name of the sensor, used as MQTT sub-topic
 
   //MotionSensor constructor
   public:
 
-    MotionSensor(int pin, int delay, String name)
+    MotionSensor(int pin, unsigned long delay, char* name)
     {
       // Read in arguments
       msPin = pin;
       msDelayPeriod = delay;
-      String topic = "MotionSensor/";
-      topic = topic+name;
-      msName=topic.c_str();
+      msName = name;
 
       // Set defaults for other variables
       msMotionState=0;
@@ -41,8 +37,8 @@ class MotionSensor{
       int motionNow = 0;
       int toreturn=3;
       motionNow=digitalRead(msPin);
-      //Serial.println(": MotionNow=" + String(motionNow));
       unsigned long currentMillis = millis();
+      //Serial.println("Counter: " + String(currentMillis - msLastChangedTime) + ": MsDelayPeriod=" + String(msDelayPeriod * 1000));
 
       //Step through each of the sensors
       //if there is movement, we can update the timer regardless of the previous state
@@ -56,7 +52,7 @@ class MotionSensor{
           msLastChangedTime=currentMillis;
           toreturn=1;
         }
-      } else if (msMotionState==1 && motionNow==LOW && currentMillis - msLastChangedTime >= msDelayPeriod){
+      } else if (msMotionState==1 && motionNow==LOW && currentMillis - msLastChangedTime >= (msDelayPeriod*1000)){
         msMotionState=0;
         msLastChangedTime=currentMillis;
         toreturn=0;
@@ -68,15 +64,21 @@ class MotionSensor{
     return msName;
   }
 }; //end MotionSensor class
+//---------------------------- End Class Definitions -------------------------//
+
 
 // Establish a MAC address
-byte mac[]    = {  0xDE, 0xED, 0xBA, 0xFE, 0xFE, 0xED };
+// byte mac[]    = {  0xDE, 0xED, 0xBA, 0xFE, 0xFE, 0xED };
+byte mac[]    = {  0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
 
 //Set up sensors
-//MotionSensor (pin,ms delay,"name")
-MotionSensor Toilet(2,10000,"Toilet");
-//MotionSensor Hallway(3,10000,"Hallway");
-
+//MotionSensor (pin,delay (secs),"name")
+//MotionSensor Toilet(2,300,"Toilet");
+//Below is an array of MotionSensor objects
+MotionSensor MotionSensorArray[2] = {
+ MotionSensor(2,200,(char*)"Toilet"),
+ MotionSensor(3,200,(char*)"Mirror"),
+};
 
 EthernetClient ethClient;
 PubSubClient client(ethClient);
@@ -98,10 +100,10 @@ void reconnect() {
   while (!client.connected()) {
     Serial.print("Attempting MQTT connection...");
     // Attempt to connect
-    if (client.connect("CeilingSensorHub")) {
+    if (client.connect("CeilingSensorHub2")) {
       Serial.println("connected");
       // Once connected, publish an announcement...
-      client.publish("testtopic","hello world from Ceiling Sensor Hub");
+      client.publish("testtopic","hello world from Ceiling Sensor Hub2");
       // ... and resubscribe
       // client.subscribe("inTopic"); We don't need to subscribe to anything
     } else {
@@ -130,18 +132,38 @@ void setup()
 void loop()
 {
   if (!client.connected()) {
+          Serial.println("Connection lost - in void loop");
     reconnect();
   } else {
   client.loop();
   }
 
-int result=Toilet.Update();
-Serial.println(result);
-if (result==1){
-  client.publish("MotionSensor/Toilet","1");
-} else if (result==0){
-  client.publish("MotionSensor/Toilet","0");
+// int result=Toilet.Update();
+// //Serial.println(result);
+// if (result==1){
+//   client.publish("MotionSensor/Toilet","1");
+// } else if (result==0){
+//   client.publish("MotionSensor/Toilet","0");
+// }
+
+// Step through object arrays
+// for (int i=0; i<sizeof MotionSensorArray/sizeof MotionSensorArray[0]; i++) {
+//    int s = arr[i];
+
+for(auto &item : MotionSensorArray){
+  switch (item.Update()) {
+     case 0:
+       client.publish(item.Name(),"0");
+       break;
+     case 1:
+       client.publish(item.Name(),"1");
+       break;
+     default:
+       // do nothing
+       break;
+  }
 }
+
 
 delay(200);
 }
