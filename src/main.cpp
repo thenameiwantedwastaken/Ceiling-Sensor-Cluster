@@ -1,18 +1,24 @@
 #include <SPI.h>
 #include <Ethernet.h>
 #include <PubSubClient.h>
+#include <SimpleDHT.h>
 
 #define LedPin 13
 
+int pinDHT22 = 8; // Pin for the temp/humidity sensor
+SimpleDHT22 dht22; // Object for the temp/humidity sensor
+int THcounter=999;
+float LastTemp=0;
+float LastHum=0;
 
 // MotionSensor class
-class MotionSensor{
+class MotionSensor {
   // Setup variables
   int msPin;                        //The pin to read input from
   bool msMotionState;               //Whether in a motion detected state
   unsigned long msLastChangedTime;  //The time of the last state change or last motion detected
-  unsigned long msDelayPeriod;         //Period (secs) during which an on state will be maintained
-  const char *msName;               //Name of the sensor, used as MQTT sub-topic
+  unsigned long msDelayPeriod;      //Period (secs) during which an on state will be maintained
+  const char *msName;               //Name of the sensor, used as MQTT topic
 
   //MotionSensor constructor
   public:
@@ -34,17 +40,16 @@ class MotionSensor{
 
     int Update(){
       // Read the motion state of this sensor right now
-      int motionNow = 0;
+      int motionNow = LOW;
       int toreturn=3;
       motionNow=digitalRead(msPin);
       unsigned long currentMillis = millis();
-      //Serial.println("Counter: " + String(currentMillis - msLastChangedTime) + ": MsDelayPeriod=" + String(msDelayPeriod * 1000));
 
-      //Step through each of the sensors
       //if there is movement, we can update the timer regardless of the previous state
       if (motionNow==HIGH) {
         msLastChangedTime=currentMillis;
       }
+
       if (msMotionState==0){
         // Motion state is set to false. Set it to true if there is movement (regardless of timer)
         if (motionNow==HIGH){
@@ -73,11 +78,11 @@ byte mac[]    = {  0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
 
 //Set up sensors
 //MotionSensor (pin,delay (secs),"name")
-//MotionSensor Toilet(2,300,"Toilet");
+//MotionSensor Toilet(2,300,"Sensors/Toilet");
 //Below is an array of MotionSensor objects
-MotionSensor MotionSensorArray[2] = {
- MotionSensor(2,200,(char*)"Toilet"),
- MotionSensor(3,200,(char*)"Mirror"),
+MotionSensor MotionSensorArray[1] = {
+ MotionSensor(2,250,(char*)"Sensors/Pin2")//,
+// MotionSensor(3,50,(char*)"Sensors/Pin3")
 };
 
 EthernetClient ethClient;
@@ -85,6 +90,7 @@ PubSubClient client(ethClient);
 
 //Called if a subscribed MQTT topic is received
 void callback(char* topic, byte* payload, unsigned int length) {
+  client.publish("Sensors/",payload);
   Serial.print("Message arrived [");
   Serial.print(topic);
   Serial.print("] ");
@@ -105,7 +111,7 @@ void reconnect() {
       // Once connected, publish an announcement...
       client.publish("testtopic","hello world from Ceiling Sensor Hub2");
       // ... and resubscribe
-      // client.subscribe("inTopic"); We don't need to subscribe to anything
+      client.subscribe("inTopic");
     } else {
       Serial.print("failed, rc=");
       Serial.print(client.state());
@@ -138,18 +144,7 @@ void loop()
   client.loop();
   }
 
-// int result=Toilet.Update();
-// //Serial.println(result);
-// if (result==1){
-//   client.publish("MotionSensor/Toilet","1");
-// } else if (result==0){
-//   client.publish("MotionSensor/Toilet","0");
-// }
-
 // Step through object arrays
-// for (int i=0; i<sizeof MotionSensorArray/sizeof MotionSensorArray[0]; i++) {
-//    int s = arr[i];
-
 for(auto &item : MotionSensorArray){
   switch (item.Update()) {
      case 0:
@@ -160,10 +155,38 @@ for(auto &item : MotionSensorArray){
        break;
      default:
        // do nothing
+       Serial.print("Nothing happening on ");
+       Serial.println(item.Name());
        break;
   }
 }
 
+//Check and publish temp and humidity
+THcounter++;
+if (THcounter>6000){
+  THcounter=0;
+  float temperature = 0;
+  float humidity = 0;
+  byte data[40] = {0};
+  int err = SimpleDHTErrSuccess;
+  if ((err = dht22.read2(pinDHT22, &temperature, &humidity, data)) != SimpleDHTErrSuccess) {
+    Serial.print("Read DHT22 failed, err="); Serial.println(err);delay(2000);
+    return;
+  }
 
+  if (LastTemp!=temperature){
+    LastTemp=temperature;
+    static char outstr[15];
+    dtostrf(temperature,4, 1, outstr);
+    client.publish("Sensors/Temp",outstr);
+  }
+
+  if (LastHum!=humidity){
+    LastHum=humidity;
+    static char outstr[15];
+    dtostrf(humidity,4, 1, outstr);
+    client.publish("Sensors/Humidity",outstr);
+  }
+}
 delay(200);
 }
